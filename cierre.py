@@ -1,5 +1,5 @@
 import streamlit as st
-import psycopg2  # Reemplaza sqlite3 para conexión online
+import psycopg2  # Librería para conexión con PostgreSQL en la nube
 import pandas as pd
 from datetime import datetime
 import plotly.express as px
@@ -10,17 +10,18 @@ FONDO_IDEAL = {500:0, 200:4, 100:20, 50:21, 20:25, 10:25, 5:50, 2:50, 1:50}
 def far(monto):
     return f"L. {monto:,.2f}"
 
-# --- CONEXIÓN A POSTGRESQL EN LA NUBE ---
+# --- CONEXIÓN COMPATIBLE CON SUPABASE EN LA NUBE (CON SSL REQUERIDO) ---
 def conectar_db():
     conn = psycopg2.connect(
         host=st.secrets["postgres"]["host"],
         database=st.secrets["postgres"]["database"],
         user=st.secrets["postgres"]["user"],
         password=st.secrets["postgres"]["password"],
-        port=st.secrets["postgres"]["port"]
+        port=st.secrets["postgres"]["port"],
+        sslmode="require"  # <-- Protección SSL obligatoria para Supabase
     )
     cursor = conn.cursor()
-    # Adaptado a sintaxis PostgreSQL (SERIAL en lugar de AUTOINCREMENT)
+    # Sintaxis estándar de PostgreSQL (SERIAL para ID incrementales)
     cursor.execute('''CREATE TABLE IF NOT EXISTS cierres 
                      (id SERIAL PRIMARY KEY, fecha TEXT, caja TEXT, efectivo DOUBLE PRECISION, 
                       t_credito DOUBLE PRECISION, t_debito DOUBLE PRECISION, transferencias DOUBLE PRECISION, 
@@ -28,12 +29,12 @@ def conectar_db():
     conn.commit()
     return conn
 
-# --- FUNCIÓN ANTI-DUPLICADOS EN LA NUBE ---
+# --- FUNCIÓN DE CONTROL DE SEGURIDAD (ANTI-DUPLICADOS) ---
 def verificar_cierre_existente(caja):
     fecha_hoy = datetime.now().strftime("%d/%m/%Y")
     conn = conectar_db()
     cursor = conn.cursor()
-    # En PostgreSQL los marcadores son %s en lugar de ?
+    # Marcador %s nativo para evitar inyecciones SQL en Postgres
     cursor.execute("SELECT id FROM cierres WHERE caja = %s AND fecha LIKE %s", (caja, f"{fecha_hoy}%"))
     resultado = cursor.fetchone()
     conn.close()
@@ -41,7 +42,7 @@ def verificar_cierre_existente(caja):
 
 st.set_page_config(page_title="Akasia Cloud Suite 2026", layout="wide")
 
-# --- CSS: DISEÑO RESPONSIVO ADAPTABLE ---
+# --- CSS: DISEÑO RESPONSIVO INTELIGENTE (CERO DESBORDES) ---
 st.markdown("""
     <style>
     .stApp { background-color: #F8FAFC; }
@@ -49,36 +50,43 @@ st.markdown("""
     input { font-size: 24px !important; font-weight: bold !important; height: 55px !important; }
     
     .card-exec {
-        background-color: #FFFFFF; padding: 20px; border-radius: 15px;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); margin-bottom: 20px; border-top: 6px solid #1E3A8A;
+        background-color: #FFFFFF; padding: 25px; border-radius: 20px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05); margin-bottom: 25px; border-top: 6px solid #1E3A8A;
     }
     
+    /* TOTALES ADAPTABLES CON CLAMP PARA PANTALLAS CHICAS */
     .hero-total, .dif-box {
         padding: 25px 15px; border-radius: 20px; text-align: center;
         display: flex; flex-direction: column; justify-content: center;
-        min-height: 180px; height: auto; width: 100%; margin-bottom: 15px;
+        min-height: 160px; height: auto; width: 100%; margin-bottom: 15px;
     }
     
     .hero-total { background-color: #1E3A8A; color: #F59E0B; }
-    .hero-monto { font-size: clamp(28px, 4vw, 48px) !important; font-weight: 900; margin: 0; line-height: 1.2; white-space: nowrap; }
-    .hero-label { color: #FFFFFF; font-size: clamp(14px, 1.5vw, 18px); font-weight: bold; text-transform: uppercase; margin-bottom: 8px; }
+    .hero-monto { 
+        font-size: clamp(26px, 3.8vw, 46px) !important; 
+        font-weight: 900; margin: 0; line-height: 1.2; 
+        white-space: nowrap; 
+    }
+    .hero-label { color: #FFFFFF; font-size: clamp(14px, 1.5vw, 17px); font-weight: bold; text-transform: uppercase; margin-bottom: 8px; }
 
+    /* CAJAS DE ALERTA DINÁMICAS */
     .dif-cuadra { background-color: #DCFCE7; color: #166534; border: 4px solid #22C55E; }
     .dif-error { background-color: #FEE2E2; color: #991B1B; border: 4px solid #EF4444; }
     .dif-sobra { background-color: #FEF3C7; color: #92400E; border: 4px solid #F59E0B; }
 
+    /* BOTÓN GIGANTE */
     .stButton>button {
-        width: 100%; height: 75px; background: #1E3A8A !important; color: white !important;
-        font-size: 24px !important; font-weight: 900 !important; border-radius: 12px !important;
+        width: 100%; height: 80px; background: #1E3A8A !important; color: white !important;
+        font-size: 26px !important; font-weight: 900 !important; border-radius: 15px !important;
     }
     </style>
     """, unsafe_allow_html=True)
 
 with st.sidebar:
-    st.markdown("<h1 style='color:white; text-align:center;'>AKASIA CLOUD</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align:center; color:white;'>AKASIA</h1>", unsafe_allow_html=True)
     opcion = st.radio("MENÚ NUBE", ["📝 Registro de Cierre", "📊 Dashboard Cloud", "📅 Historial"])
 
-# --- DASHBOARD CLOUD ---
+# --- SECCIÓN: DASHBOARD CLOUD ---
 if opcion == "📊 Dashboard Cloud":
     st.markdown("<h1 style='color:#1E3A8A;'>📊 Rendimiento en Tiempo Real</h1>", unsafe_allow_html=True)
     conn = conectar_db()
@@ -92,22 +100,22 @@ if opcion == "📊 Dashboard Cloud":
         df['fecha_dt'] = pd.to_datetime(df['fecha'], dayfirst=True)
         k1, k2, k3 = st.columns(3)
         k1.metric("Ventas Totales Nube", far(df['total'].sum()))
-        k2.metric("Promedio de Venta", far(df['total'].mean()))
+        k2.metric("Promedio Diario", far(df['total'].mean()))
         k3.metric("Balance de Descuadres", far(df['diferencia'].sum()), delta=far(df['diferencia'].sum()), delta_color="inverse")
 
         st.markdown("<div class='card-exec'>", unsafe_allow_html=True)
         fig = px.line(df, x='fecha_dt', y='total', title='📈 Histórico de Ventas Online', markers=True)
-        st.plotly_chart(fig, width='stretch')
+        st.plotly_chart(fig, use_container_width=True)
         st.markdown("</div>", unsafe_allow_html=True)
     else:
-        st.info("No hay datos en la nube todavía.")
+        st.info("No hay transacciones registradas en la nube todavía.")
 
-# --- REGISTRO DE CIERRE ---
+# --- SECCIÓN: REGISTRO DE CIERRE ---
 elif opcion == "📝 Registro de Cierre":
-    st.markdown("<h1 style='color:#1E3A8A; font-size:45px;'>Cierre de Caja Akasia</h1>", unsafe_allow_html=True)
-    caja_sel = st.selectbox("📍 SELECCIONE CAJA", ["CAJA DEL NEGOCIO", "CAJA DE LA CARPA"])
+    st.markdown("<h1 style='color:#1E3A8A; font-size:45px;'>Cierre Diario Akasia</h1>", unsafe_allow_html=True)
+    caja_sel = st.selectbox("📍 PUNTO DE VENTA", ["CAJA DEL NEGOCIO", "CAJA DE LA CARPA"])
 
-    # 1. Billetes (3 Columnas)
+    # 1. BILLETES (3 COLUMNAS)
     st.markdown("<div class='card-exec'>", unsafe_allow_html=True)
     st.markdown("### 💵 1. CONTEO DE BILLETES")
     b1, b2, b3 = st.columns(3)
@@ -123,7 +131,7 @@ elif opcion == "📝 Registro de Cierre":
     st.markdown(f"<div class='hero-total'><p class='hero-label'>Efectivo Contado</p><p class='hero-monto'>{far(total_ef)}</p></div>", unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # 2 y 3. Otros y Sistema
+    # 2 y 3. OTROS Y SISTEMA
     col_a, col_b = st.columns(2)
     with col_a:
         st.markdown("<div class='card-exec'>", unsafe_allow_html=True)
@@ -136,24 +144,23 @@ elif opcion == "📝 Registro de Cierre":
         st.markdown("<div class='card-exec'>", unsafe_allow_html=True)
         st.markdown("### 📄 3. SISTEMA")
         esp_ak = st.number_input("TOTAL SISTEMA AKASIA", min_value=0.0)
-        notas = st.text_area("🗒 shrink_to_fit Notas:")
+        notas = st.text_area("🗒️ Notas:")
         st.markdown("</div>", unsafe_allow_html=True)
 
-    # 4. Balance Final
+    # 4. BALANCE FINAL (AJUSTE DINÁMICO)
     total_real_v = total_ef + t_cre + t_deb + trans
     dif_final = total_real_v - esp_ak
-
     st.markdown("### 📊 4. BALANCE FINAL DEL DÍA")
     c_res1, c_res2 = st.columns(2)
     with c_res1:
-        st.markdown(f"<div class='hero-total' style='background-color:#0F172A;'><p class='hero-label'>VENTA TOTAL REAL (BRUTA)</p><p class='hero-monto' style='color:#22C55E;'>{far(total_real_v)}</p></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='hero-total' style='background-color:#0F172A;'><p class='hero-label'>VENTA TOTAL REAL</p><p class='hero-monto' style='color:#22C55E;'>{far(total_real_v)}</p></div>", unsafe_allow_html=True)
     with c_res2:
         if abs(dif_final) < 0.1: clase, msg = "dif-cuadra", "CAJA CUADRADA"
         elif dif_final > 0: clase, msg = "dif-sobra", "SOBRANTE EN CAJA"
         else: clase, msg = "dif-error", "FALTANTE EN CAJA"
         st.markdown(f"<div class='dif-box {clase}'><p class='hero-label' style='color:inherit;'>{msg}</p><p class='hero-monto'>{far(dif_final)}</p></div>", unsafe_allow_html=True)
 
-    # 5. Reposición
+    # 5. REPOSICIÓN
     st.divider()
     st.markdown("<div class='card-exec' style='border-top-color:#EF4444;'>", unsafe_allow_html=True)
     st.markdown("### 💰 5. REPOSICIÓN DE FONDO (L. 5,000)")
@@ -161,7 +168,7 @@ elif opcion == "📝 Registro de Cierre":
     falt_f = 5000 - fondo_act
     f1, f2 = st.columns(2)
     with f1:
-        st.markdown(f"**Faltante: {far(falt_f)}**")
+        st.markdown(f"<h3 style='color:#B91C1C;'>Faltante: {far(falt_f)}</h3>", unsafe_allow_html=True)
         txt_wa = ""
         for d in [500, 200, 100, 50, 20, 10, 5, 2, 1]:
             tengo = min(ing[d], FONDO_IDEAL[d])
@@ -171,15 +178,22 @@ elif opcion == "📝 Registro de Cierre":
                 txt_wa += f" · L. {d}: Faltan {necesito}\n"
     with f2:
         cambio = st.number_input("Cambio Tomado", min_value=0.0)
-        rep_wa = f"📌 REPOSICIÓN FONDO - {caja_sel}\n❌ Faltante Total: {far(falt_f)}\n💵 Cambio Tomado: {far(cambio)}\n🔄 Vuelto: {far(cambio-falt_f)}\n------------------\nBilletes faltantes:\n{txt_wa if txt_wa else 'OK ✅'}"
+        rep_wa = f"📌 REPOSICIÓN FONDO - {caja_sel}\n❌ Faltante Total: {far(falt_f)}\n💵 Cambio Tomado: {far(cambio)}\n🔄 Vuelto: {far(cambio-falt_f)}\n------------------\nBilletes faltantes:\n{txt_wa if txt_wa else 'Fondo OK ✅'}"
         st.code(rep_wa, language="markdown")
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # 6. Sobre
+    # 6. SOBRE (OBJETIVO CLARO)
     st.markdown("<div class='card-exec' style='border-top-color:#10B981;'>", unsafe_allow_html=True)
     st.markdown("### 🏦 6. SOBRE PARA DEPÓSITO")
-    esp_s = total_ef - 5000
-    st.markdown(f"<div style='background-color:#ECFDF5; padding:20px; border-radius:15px; border:2px dashed #10B981; text-align:center; margin-bottom:20px;'><p style='color:#065F46; font-size:20px; font-weight:bold; margin:0;'>MONTO QUE DEBE HABER EN EL SOBRE:</p><h2 style='color:#10B981; font-size:45px; margin:5px;'>{far(esp_s)}</h2></div>", unsafe_allow_html=True)
+    
+    debe_haber_sobre = total_ef - 5000  # <--- Cálculo del dinero esperado en sobre
+    
+    st.markdown(f"""
+        <div style='background-color:#ECFDF5; padding:20px; border-radius:15px; border:2px dashed #10B981; text-align:center; margin-bottom:20px;'>
+            <p style='color:#065F46; font-size:18px; font-weight:bold; margin:0;'>MONTO QUE DEBE HABER EN EL SOBRE:</p>
+            <h2 style='color:#10B981; font-size:40px; margin:5px;'>{far(debe_haber_sobre)}</h2>
+        </div>
+        """, unsafe_allow_html=True)
     
     s1, s2, s3 = st.columns(3)
     dep_ing = {}
@@ -190,15 +204,16 @@ elif opcion == "📝 Registro de Cierre":
     with s3: 
         for d in [5, 2, 1]: dep_ing[d] = st.number_input(f"Sobre L. {d}", min_value=0, key=f"s_{d}")
     
-    t_s = sum(d * cant for d, cant in dep_ing.items())
-    st.markdown(f"<div class='hero-total' style='background:#F1F5F9; border-left:15px solid #10B981; min-height:150px;'><p style='color:#64748B; font-size:18px; font-weight:bold; margin:0;'>TOTAL EN SOBRE</p><p class='hero-monto' style='color:#10B981;'>{far(t_s)}</p></div>", unsafe_allow_html=True)
+    total_s = sum(d * cant for d, cant in dep_ing.items())
+    st.markdown(f"<div class='hero-total' style='background:#F1F5F9; border-left:20px solid #10B981; min-height:140px;'><p style='color:#64748B; font-size:18px; font-weight:bold; margin:0;'>TOTAL FÍSICO EN SOBRE</p><p class='hero-monto' style='color:#10B981;'>{far(total_s)}</p></div>", unsafe_allow_html=True)
     
-    if t_s > 0 and abs(t_s - esp_s) < 0.1:
+    if total_s > 0 and abs(total_s - debe_haber_sobre) < 0.1:
         st.balloons()
-        st.success("✅ SOBRE CUADRADO")
+        st.success("✅ SOBRE CUADRADO CON ÉXITO")
     st.markdown("</div>", unsafe_allow_html=True)
 
-    if st.button("💾 FINALIZAR Y GUARDAR"):
+    # BOTÓN GUARDAR CON FILTRO DE DUPLICADOS
+    if st.button("💾 FINALIZAR Y GUARDAR CIERRE"):
         ya_existe = verificar_cierre_existente(caja_sel)
         if ya_existe:
             st.error(f"❌ El Cierre del Día ya está guardado para {caja_sel}. No se permiten duplicados.")
@@ -210,7 +225,7 @@ elif opcion == "📝 Registro de Cierre":
                                  (fecha_h, caja_sel, total_ef, t_cre, t_deb, trans, total_real_v, dif_final, notas))
             conn.commit()
             conn.close()
-            st.success("¡Cierre guardado online de forma segura!")
+            st.success("✅ Cierre guardado en la nube perfectamente.")
 
 elif opcion == "📅 Historial":
     st.markdown("<h1 style='color:#1E3A8A;'>📅 Historial Online</h1>", unsafe_allow_html=True)

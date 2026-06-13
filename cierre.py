@@ -1,16 +1,19 @@
 import streamlit as st
-import psycopg2  # Librería para conexión con PostgreSQL en la nube
+import psycopg2  
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta, timezone  # <-- Agregamos control de zonas del reloj
 import plotly.express as px
 
 # 1. CONFIGURACIÓN DEL FONDO IDEAL HONDURAS (L. 5,000.00)
 FONDO_IDEAL = {500:0, 200:4, 100:20, 50:21, 20:25, 10:25, 5:50, 2:50, 1:50}
 
+# 🌍 ANCLA DEL RELOJ: Forzamos la zona horaria de Honduras (UTC -6 horas)
+TZ_HONDURAS = timezone(timedelta(hours=-6))
+
 def far(monto):
     return f"L. {monto:,.2f}"
 
-# --- CONEXIÓN COMPATIBLE CON SUPABASE EN LA NUBE (CON SSL REQUERIDO) ---
+# --- CONEXIÓN COMPATIBLE CON SUPABASE EN LA NUBE ---
 def conectar_db():
     conn = psycopg2.connect(
         host=st.secrets["postgres"]["host"],
@@ -18,10 +21,9 @@ def conectar_db():
         user=st.secrets["postgres"]["user"],
         password=st.secrets["postgres"]["password"],
         port=st.secrets["postgres"]["port"],
-        sslmode="require"  # <-- Protección SSL obligatoria para Supabase
+        sslmode="require"
     )
     cursor = conn.cursor()
-    # Sintaxis estándar de PostgreSQL (SERIAL para ID incrementales)
     cursor.execute('''CREATE TABLE IF NOT EXISTS cierres 
                      (id SERIAL PRIMARY KEY, fecha TEXT, caja TEXT, efectivo DOUBLE PRECISION, 
                       t_credito DOUBLE PRECISION, t_debito DOUBLE PRECISION, transferencias DOUBLE PRECISION, 
@@ -29,12 +31,12 @@ def conectar_db():
     conn.commit()
     return conn
 
-# --- FUNCIÓN DE CONTROL DE SEGURIDAD (ANTI-DUPLICADOS) ---
+# --- FUNCIÓN DE CONTROL DE SEGURIDAD (ANTI-DUPLICADOS EN HORA HN) ---
 def verificar_cierre_existente(caja):
-    fecha_hoy = datetime.now().strftime("%d/%m/%Y")
+    # Usamos la hora de Honduras para evaluar el día actual real
+    fecha_hoy = datetime.now(TZ_HONDURAS).strftime("%d/%m/%Y")
     conn = conectar_db()
     cursor = conn.cursor()
-    # Marcador %s nativo para evitar inyecciones SQL en Postgres
     cursor.execute("SELECT id FROM cierres WHERE caja = %s AND fecha LIKE %s", (caja, f"{fecha_hoy}%"))
     resultado = cursor.fetchone()
     conn.close()
@@ -42,7 +44,7 @@ def verificar_cierre_existente(caja):
 
 st.set_page_config(page_title="Akasia Cloud Suite 2026", layout="wide")
 
-# --- CSS: DISEÑO RESPONSIVO INTELIGENTE (CERO DESBORDES) ---
+# --- CSS: DISEÑO RESPONSIVO INTELIGENTE ---
 st.markdown("""
     <style>
     .stApp { background-color: #F8FAFC; }
@@ -54,7 +56,6 @@ st.markdown("""
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05); margin-bottom: 25px; border-top: 6px solid #1E3A8A;
     }
     
-    /* TOTALES ADAPTABLES CON CLAMP PARA PANTALLAS CHICAS */
     .hero-total, .dif-box {
         padding: 25px 15px; border-radius: 20px; text-align: center;
         display: flex; flex-direction: column; justify-content: center;
@@ -62,19 +63,13 @@ st.markdown("""
     }
     
     .hero-total { background-color: #1E3A8A; color: #F59E0B; }
-    .hero-monto { 
-        font-size: clamp(26px, 3.8vw, 46px) !important; 
-        font-weight: 900; margin: 0; line-height: 1.2; 
-        white-space: nowrap; 
-    }
+    .hero-monto { font-size: clamp(26px, 3.8vw, 46px) !important; font-weight: 900; margin: 0; line-height: 1.2; white-space: nowrap; }
     .hero-label { color: #FFFFFF; font-size: clamp(14px, 1.5vw, 17px); font-weight: bold; text-transform: uppercase; margin-bottom: 8px; }
 
-    /* CAJAS DE ALERTA DINÁMICAS */
     .dif-cuadra { background-color: #DCFCE7; color: #166534; border: 4px solid #22C55E; }
     .dif-error { background-color: #FEE2E2; color: #991B1B; border: 4px solid #EF4444; }
     .dif-sobra { background-color: #FEF3C7; color: #92400E; border: 4px solid #F59E0B; }
 
-    /* BOTÓN GIGANTE */
     .stButton>button {
         width: 100%; height: 80px; background: #1E3A8A !important; color: white !important;
         font-size: 26px !important; font-weight: 900 !important; border-radius: 15px !important;
@@ -115,7 +110,7 @@ elif opcion == "📝 Registro de Cierre":
     st.markdown("<h1 style='color:#1E3A8A; font-size:45px;'>Cierre Diario Akasia</h1>", unsafe_allow_html=True)
     caja_sel = st.selectbox("📍 PUNTO DE VENTA", ["CAJA DEL NEGOCIO", "CAJA DE LA CARPA"])
 
-    # 1. BILLETES (3 COLUMNAS)
+    # 1. BILLETES
     st.markdown("<div class='card-exec'>", unsafe_allow_html=True)
     st.markdown("### 💵 1. CONTEO DE BILLETES")
     b1, b2, b3 = st.columns(3)
@@ -147,7 +142,7 @@ elif opcion == "📝 Registro de Cierre":
         notas = st.text_area("🗒️ Notas:")
         st.markdown("</div>", unsafe_allow_html=True)
 
-    # 4. BALANCE FINAL (AJUSTE DINÁMICO)
+    # 4. BALANCE FINAL
     total_real_v = total_ef + t_cre + t_deb + trans
     dif_final = total_real_v - esp_ak
     st.markdown("### 📊 4. BALANCE FINAL DEL DÍA")
@@ -182,18 +177,11 @@ elif opcion == "📝 Registro de Cierre":
         st.code(rep_wa, language="markdown")
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # 6. SOBRE (OBJETIVO CLARO)
+    # 6. SOBRE
     st.markdown("<div class='card-exec' style='border-top-color:#10B981;'>", unsafe_allow_html=True)
     st.markdown("### 🏦 6. SOBRE PARA DEPÓSITO")
-    
-    debe_haber_sobre = total_ef - 5000  # <--- Cálculo del dinero esperado en sobre
-    
-    st.markdown(f"""
-        <div style='background-color:#ECFDF5; padding:20px; border-radius:15px; border:2px dashed #10B981; text-align:center; margin-bottom:20px;'>
-            <p style='color:#065F46; font-size:18px; font-weight:bold; margin:0;'>MONTO QUE DEBE HABER EN EL SOBRE:</p>
-            <h2 style='color:#10B981; font-size:40px; margin:5px;'>{far(debe_haber_sobre)}</h2>
-        </div>
-        """, unsafe_allow_html=True)
+    debe_haber_sobre = total_ef - 5000
+    st.markdown(f"<div style='background-color:#ECFDF5; padding:20px; border-radius:15px; border:2px dashed #10B981; text-align:center; margin-bottom:20px;'><p style='color:#065F46; font-size:18px; font-weight:bold; margin:0;'>MONTO QUE DEBE HABER EN EL SOBRE:</p><h2 style='color:#10B981; font-size:40px; margin:5px;'>{far(debe_haber_sobre)}</h2></div>", unsafe_allow_html=True)
     
     s1, s2, s3 = st.columns(3)
     dep_ing = {}
@@ -212,13 +200,14 @@ elif opcion == "📝 Registro de Cierre":
         st.success("✅ SOBRE CUADRADO CON ÉXITO")
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # BOTÓN GUARDAR CON FILTRO DE DUPLICADOS
+    # BOTÓN GUARDAR
     if st.button("💾 FINALIZAR Y GUARDAR CIERRE"):
         ya_existe = verificar_cierre_existente(caja_sel)
         if ya_existe:
             st.error(f"❌ El Cierre del Día ya está guardado para {caja_sel}. No se permiten duplicados.")
         else:
-            fecha_h = datetime.now().strftime("%d/%m/%Y %H:%M")
+            # Capturamos el momento exacto ajustado a la zona horaria de Honduras
+            fecha_h = datetime.now(TZ_HONDURAS).strftime("%d/%m/%Y %H:%M")
             conn = conectar_db()
             cursor = conn.cursor()
             cursor.execute("INSERT INTO cierres (fecha, caja, efectivo, t_credito, t_debito, transferencias, total, diferencia, notas) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)", 

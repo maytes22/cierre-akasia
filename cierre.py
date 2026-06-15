@@ -1,13 +1,13 @@
 import streamlit as st
 import psycopg2  
 import pandas as pd
-from datetime import datetime, timedelta, timezone  # <-- Agregamos control de zonas del reloj
+from datetime import datetime, timedelta, timezone  
 import plotly.express as px
 
 # 1. CONFIGURACIÓN DEL FONDO IDEAL HONDURAS (L. 5,000.00)
 FONDO_IDEAL = {500:0, 200:4, 100:20, 50:21, 20:25, 10:25, 5:50, 2:50, 1:50}
 
-# 🌍 ANCLA DEL RELOJ: Forzamos la zona horaria de Honduras (UTC -6 horas)
+# 🌍 ANCLA DEL RELOJ: Zona horaria oficial de Honduras
 TZ_HONDURAS = timezone(timedelta(hours=-6))
 
 def far(monto):
@@ -31,9 +31,8 @@ def conectar_db():
     conn.commit()
     return conn
 
-# --- FUNCIÓN DE CONTROL DE SEGURIDAD (ANTI-DUPLICADOS EN HORA HN) ---
+# --- FUNCIÓN DE CONTROL DE SEGURIDAD (ANTI-DUPLICADOS) ---
 def verificar_cierre_existente(caja):
-    # Usamos la hora de Honduras para evaluar el día actual real
     fecha_hoy = datetime.now(TZ_HONDURAS).strftime("%d/%m/%Y")
     conn = conectar_db()
     cursor = conn.cursor()
@@ -177,11 +176,18 @@ elif opcion == "📝 Registro de Cierre":
         st.code(rep_wa, language="markdown")
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # 6. SOBRE
+    # 6. SOBRE PARA DEPÓSITO (ACTUALIZADO CON BALANCE DETALLADO)
     st.markdown("<div class='card-exec' style='border-top-color:#10B981;'>", unsafe_allow_html=True)
     st.markdown("### 🏦 6. SOBRE PARA DEPÓSITO")
-    debe_haber_sobre = total_ef - 5000
-    st.markdown(f"<div style='background-color:#ECFDF5; padding:20px; border-radius:15px; border:2px dashed #10B981; text-align:center; margin-bottom:20px;'><p style='color:#065F46; font-size:18px; font-weight:bold; margin:0;'>MONTO QUE DEBE HABER EN EL SOBRE:</p><h2 style='color:#10B981; font-size:40px; margin:5px;'>{far(debe_haber_sobre)}</h2></div>", unsafe_allow_html=True)
+    
+    debe_haber_sobre = total_ef - 5000  
+    
+    st.markdown(f"""
+        <div style='background-color:#ECFDF5; padding:20px; border-radius:15px; border:2px dashed #10B981; text-align:center; margin-bottom:20px;'>
+            <p style='color:#065F46; font-size:18px; font-weight:bold; margin:0;'>MONTO QUE DEBE HABER EN EL SOBRE:</p>
+            <h2 style='color:#10B981; font-size:40px; margin:5px;'>{far(debe_haber_sobre)}</h2>
+        </div>
+        """, unsafe_allow_html=True)
     
     s1, s2, s3 = st.columns(3)
     dep_ing = {}
@@ -193,11 +199,25 @@ elif opcion == "📝 Registro de Cierre":
         for d in [5, 2, 1]: dep_ing[d] = st.number_input(f"Sobre L. {d}", min_value=0, key=f"s_{d}")
     
     total_s = sum(d * cant for d, cant in dep_ing.items())
-    st.markdown(f"<div class='hero-total' style='background:#F1F5F9; border-left:20px solid #10B981; min-height:140px;'><p style='color:#64748B; font-size:18px; font-weight:bold; margin:0;'>TOTAL FÍSICO EN SOBRE</p><p class='hero-monto' style='color:#10B981;'>{far(total_s)}</p></div>", unsafe_allow_html=True)
     
-    if total_s > 0 and abs(total_s - debe_haber_sobre) < 0.1:
+    # --- NUEVA LÓGICA: CÁLCULO DE RESTA DEL SOBRE ---
+    dif_sobre = total_s - debe_haber_sobre
+    
+    st.markdown("<br>", unsafe_allow_html=True)
+    c_sobre1, c_sobre2 = st.columns(2)
+    with c_sobre1:
+        st.markdown(f"<div class='hero-total' style='background:#F1F5F9; border-left:20px solid #10B981; min-height:150px;'><p style='color:#64748B; font-size:18px; font-weight:bold; margin:0;'>TOTAL FÍSICO EN SOBRE</p><p class='hero-monto' style='color:#10B981;'>{far(total_s)}</p></div>", unsafe_allow_html=True)
+    with c_sobre2:
+        if abs(dif_sobre) < 0.1: 
+            clase_s, msg_s = "dif-cuadra", "SOBRE CUADRADO"
+        elif dif_sobre > 0: 
+            clase_s, msg_s = "dif-sobra", "SOBRANTE EN SOBRE"
+        else: 
+            clase_s, msg_s = "dif-error", "FALTANTE EN SOBRE"
+        st.markdown(f"<div class='dif-box {clase_s}' style='min-height:150px;'><p class='hero-label' style='color:inherit;'>{msg_s}</p><p class='hero-monto'>{far(dif_sobre)}</p></div>", unsafe_allow_html=True)
+    
+    if total_s > 0 and abs(dif_sobre) < 0.1:
         st.balloons()
-        st.success("✅ SOBRE CUADRADO CON ÉXITO")
     st.markdown("</div>", unsafe_allow_html=True)
 
     # BOTÓN GUARDAR
@@ -206,7 +226,6 @@ elif opcion == "📝 Registro de Cierre":
         if ya_existe:
             st.error(f"❌ El Cierre del Día ya está guardado para {caja_sel}. No se permiten duplicados.")
         else:
-            # Capturamos el momento exacto ajustado a la zona horaria de Honduras
             fecha_h = datetime.now(TZ_HONDURAS).strftime("%d/%m/%Y %H:%M")
             conn = conectar_db()
             cursor = conn.cursor()

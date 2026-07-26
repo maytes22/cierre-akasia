@@ -146,14 +146,22 @@ elif opcion == "📝 Registro de Cierre":
     with col_top2:
         st.markdown("<div style='height: 32px;'></div>", unsafe_allow_html=True)
         if st.button("🧹 Limpiar Formulario"):
+            # 1. Borramos cualquier respaldo en la nube
             borrar_borrador_db(caja_sel)
-            for k_cls in [f"n_{d}" for d in [500, 200, 100, 50, 20, 10, 5, 2, 1]] + \
-                         [f"s_{d}" for d in [500, 200, 100, 50, 20, 10, 5, 2, 1]] + \
-                         ["t_cre", "t_deb", "trans", "esp_ak", "notas", "cambio"]:
-                if k_cls in st.session_state:
-                    del st.session_state[k_cls]
-            if f"cargado_{caja_sel}" in st.session_state:
-                del st.session_state[f"cargado_{caja_sel}"]
+            
+            # 2. Forzamos matemáticamente todos los campos a CERO y VACÍO
+            for d in [500, 200, 100, 50, 20, 10, 5, 2, 1]:
+                st.session_state[f"n_{d}"] = 0
+                st.session_state[f"s_{d}"] = 0
+            
+            st.session_state["t_cre"] = 0.0
+            st.session_state["t_deb"] = 0.0
+            st.session_state["trans"] = 0.0
+            st.session_state["esp_ak"] = 0.0
+            st.session_state["cambio"] = 0.0
+            st.session_state["notas"] = ""
+            
+            # 3. Recargamos la pantalla limpia
             st.rerun()
 
     # --- RESTAURACIÓN AUTOMÁTICA AL ABRIR LA PÁGINA ---
@@ -274,17 +282,30 @@ elif opcion == "📝 Registro de Cierre":
         st.balloons()
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # --- AUTOGUARDADO AUTOMÁTICO EN CADA CAMBIO ---
+    # --- AUTOGUARDADO INTELIGENTE (Solo guarda si hay datos) ---
     mapa_actual = {}
     hay_cambios = False
-    for k in [f"n_{d}" for d in [500, 200, 100, 50, 20, 10, 5, 2, 1]] + \
-             [f"s_{d}" for d in [500, 200, 100, 50, 20, 10, 5, 2, 1]] + \
-             ["t_cre", "t_deb", "trans", "esp_ak", "notas", "cambio"]:
-        v_act = st.session_state.get(k, 0)
-        mapa_actual[k] = v_act
-        if v_act:
+    
+    for d in [500, 200, 100, 50, 20, 10, 5, 2, 1]:
+        n_val = st.session_state.get(f"n_{d}", 0)
+        s_val = st.session_state.get(f"s_{d}", 0)
+        mapa_actual[f"n_{d}"] = n_val
+        mapa_actual[f"s_{d}"] = s_val
+        if n_val > 0 or s_val > 0:
             hay_cambios = True
+            
+    for k_float in ["t_cre", "t_deb", "trans", "esp_ak", "cambio"]:
+        f_val = st.session_state.get(k_float, 0.0)
+        mapa_actual[k_float] = f_val
+        if f_val > 0.0:
+            hay_cambios = True
+            
+    notas_act = st.session_state.get("notas", "")
+    mapa_actual["notas"] = notas_act
+    if notas_act.strip() != "":
+        hay_cambios = True
 
+    # Si hay al menos 1 billete o nota, guarda. Si todo está en 0, no guarda nada en blanco.
     if hay_cambios:
         auto_guardar_borrador_db(caja_sel, mapa_actual)
 
@@ -304,7 +325,7 @@ elif opcion == "📝 Registro de Cierre":
             conn.commit()
             conn.close()
             
-            # Limpiamos el borrador ya que el cierre ya se guardó de forma definitiva
+            # Limpiamos el borrador temporal ya que el cierre se completó
             borrar_borrador_db(caja_sel)
             st.success("✅ Cierre guardado en la nube perfectamente.")
 

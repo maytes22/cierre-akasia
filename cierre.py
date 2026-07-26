@@ -3,7 +3,7 @@ import psycopg2
 import pandas as pd
 from datetime import datetime, timedelta, timezone  
 import plotly.express as px
-import json  # Importante para empaquetar el borrador en la nube
+import json
 
 # 1. CONFIGURACIÓN DEL FONDO IDEAL HONDURAS (L. 5,000.00)
 FONDO_IDEAL = {500:0, 200:4, 100:20, 50:21, 20:25, 10:25, 5:50, 2:50, 1:50}
@@ -104,8 +104,12 @@ st.markdown("""
     .dif-sobra { background-color: #FEF3C7; color: #92400E; border: 4px solid #F59E0B; }
 
     .stButton>button {
-        width: 100%; height: 80px; background: #1E3A8A !important; color: white !important;
-        font-size: 26px !important; font-weight: 900 !important; border-radius: 15px !important;
+        width: 100%; height: 70px; background: #1E3A8A !important; color: white !important;
+        font-size: 22px !important; font-weight: 800 !important; border-radius: 15px !important;
+    }
+    
+    .btn-borrador>button {
+        height: 55px !important; font-size: 18px !important; background: #059669 !important;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -140,10 +144,27 @@ if opcion == "📊 Dashboard Cloud":
 
 # --- SECCIÓN: REGISTRO DE CIERRE ---
 elif opcion == "📝 Registro de Cierre":
-    st.markdown("<h1 style='color:#1E3A8A; font-size:45px;'>Cierre Diario Akasia</h1>", unsafe_allow_html=True)
-    caja_sel = st.selectbox("📍 PUNTO DE VENTA", ["CAJA DEL NEGOCIO", "CAJA DE LA CARPA"])
+    st.markdown("<h1 style='color:#1E3A8A; font-size:40px; margin-bottom:10px;'>Cierre Diario Akasia</h1>", unsafe_allow_html=True)
+    
+    # --- BARRA DE CONTROL SUPERIOR (PUNTO DE VENTA + BOTÓN BORRADOR RÁPIDO) ---
+    col_top1, col_top2 = st.columns([2, 1])
+    with col_top1:
+        caja_sel = st.selectbox("📍 PUNTO DE VENTA", ["CAJA DEL NEGOCIO", "CAJA DE LA CARPA"])
+    with col_top2:
+        st.markdown("<div style='height: 32px;'></div>", unsafe_allow_html=True)
+        st.markdown("<div class='btn-borrador'>", unsafe_allow_html=True)
+        if st.button("💾 GUARDAR AVANCE"):
+            mapa_campos = {}
+            for k in [f"n_{d}" for d in [500, 200, 100, 50, 20, 10, 5, 2, 1]] + \
+                     [f"s_{d}" for d in [500, 200, 100, 50, 20, 10, 5, 2, 1]] + \
+                     ["t_cre", "t_deb", "trans", "esp_ak", "notas", "cambio"]:
+                if k in st.session_state:
+                    mapa_campos[k] = st.session_state[k]
+            guardar_borrador_db(caja_sel, mapa_campos)
+            st.toast("✅ Avance guardado en la nube.", icon="💾")
+        st.markdown("</div>", unsafe_allow_html=True)
 
-    # --- REVISIÓN Y RESTAURACIÓN DE BORRADORES ---
+    # --- REVISIÓN Y RESTAURACIÓN DE BORRADORES (ARRIBA DEL TODO) ---
     borrador_existente = obtener_borrador_db(caja_sel)
     if borrador_existente:
         datos_json, fecha_borrador = borrador_existente
@@ -269,19 +290,6 @@ elif opcion == "📝 Registro de Cierre":
     if total_s > 0 and abs(dif_sobre) < 0.1:
         st.balloons()
     st.markdown("</div>", unsafe_allow_html=True)
-
-    # BOTÓN SECUNDARIO: GUARDAR BORRADOR EN CUALQUIER MOMENTO
-    st.divider()
-    if st.button("💾 GUARDAR BORRADOR TEMPORAL (RESPALDO DE SEGURIDAD)"):
-        # Empaquetamos todo el estado actual
-        mapa_campos = {}
-        for d in [500, 200, 100, 50, 20, 10, 5, 2, 1]:
-            mapa_campos[f"n_{d}"] = ing[d]
-            mapa_campos[f"s_{d}"] = dep_ing[d]
-        mapa_campos.update({"t_cre": t_cre, "t_deb": t_deb, "trans": trans, "esp_ak": esp_ak, "notas": notas, "cambio": cambio})
-        
-        guardar_borrador_db(caja_sel, mapa_campos)
-        st.success("✅ Progreso guardado de forma segura en la nube. Si la página se recarga, podrás restaurarlo.")
 
     st.markdown("<br>", unsafe_allow_html=True)
 

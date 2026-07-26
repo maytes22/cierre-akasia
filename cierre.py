@@ -25,20 +25,18 @@ def conectar_db():
         sslmode="require"
     )
     cursor = conn.cursor()
-    # Tabla principal de cierres
     cursor.execute('''CREATE TABLE IF NOT EXISTS cierres 
                      (id SERIAL PRIMARY KEY, fecha TEXT, caja TEXT, efectivo DOUBLE PRECISION, 
                       t_credito DOUBLE PRECISION, t_debito DOUBLE PRECISION, transferencias DOUBLE PRECISION, 
                       total DOUBLE PRECISION, diferencia DOUBLE PRECISION, notas TEXT)''')
     
-    # Tabla secundaria para guardar borradores temporales anti-pérdida
     cursor.execute('''CREATE TABLE IF NOT EXISTS borradores 
                      (caja TEXT PRIMARY KEY, datos TEXT, fecha TEXT)''')
     conn.commit()
     return conn
 
-# --- FUNCIONES DE GESTIÓN DE BORRADORES ---
-def guardar_borrador_db(caja, datos_dict):
+# --- FUNCIONES SILENCIOSAS DE GESTIÓN DE BORRADORES ---
+def auto_guardar_borrador_db(caja, datos_dict):
     fecha_h = datetime.now(TZ_HONDURAS).strftime("%d/%m/%Y %H:%M")
     conn = conectar_db()
     cursor = conn.cursor()
@@ -53,7 +51,7 @@ def guardar_borrador_db(caja, datos_dict):
 def obtener_borrador_db(caja):
     conn = conectar_db()
     cursor = conn.cursor()
-    cursor.execute("SELECT datos, fecha FROM borradores WHERE caja = %s", (caja,))
+    cursor.execute("SELECT datos FROM borradores WHERE caja = %s", (caja,))
     res = cursor.fetchone()
     conn.close()
     return res
@@ -104,12 +102,8 @@ st.markdown("""
     .dif-sobra { background-color: #FEF3C7; color: #92400E; border: 4px solid #F59E0B; }
 
     .stButton>button {
-        width: 100%; height: 70px; background: #1E3A8A !important; color: white !important;
-        font-size: 22px !important; font-weight: 800 !important; border-radius: 15px !important;
-    }
-    
-    .btn-borrador>button {
-        height: 55px !important; font-size: 18px !important; background: #059669 !important;
+        width: 100%; height: 75px; background: #1E3A8A !important; color: white !important;
+        font-size: 24px !important; font-weight: 900 !important; border-radius: 15px !important;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -146,42 +140,31 @@ if opcion == "📊 Dashboard Cloud":
 elif opcion == "📝 Registro de Cierre":
     st.markdown("<h1 style='color:#1E3A8A; font-size:40px; margin-bottom:10px;'>Cierre Diario Akasia</h1>", unsafe_allow_html=True)
     
-    # --- BARRA DE CONTROL SUPERIOR (PUNTO DE VENTA + BOTÓN BORRADOR RÁPIDO) ---
-    col_top1, col_top2 = st.columns([2, 1])
+    col_top1, col_top2 = st.columns([3, 1])
     with col_top1:
         caja_sel = st.selectbox("📍 PUNTO DE VENTA", ["CAJA DEL NEGOCIO", "CAJA DE LA CARPA"])
     with col_top2:
         st.markdown("<div style='height: 32px;'></div>", unsafe_allow_html=True)
-        st.markdown("<div class='btn-borrador'>", unsafe_allow_html=True)
-        if st.button("💾 GUARDAR AVANCE"):
-            mapa_campos = {}
-            for k in [f"n_{d}" for d in [500, 200, 100, 50, 20, 10, 5, 2, 1]] + \
-                     [f"s_{d}" for d in [500, 200, 100, 50, 20, 10, 5, 2, 1]] + \
-                     ["t_cre", "t_deb", "trans", "esp_ak", "notas", "cambio"]:
-                if k in st.session_state:
-                    mapa_campos[k] = st.session_state[k]
-            guardar_borrador_db(caja_sel, mapa_campos)
-            st.toast("✅ Avance guardado en la nube.", icon="💾")
-        st.markdown("</div>", unsafe_allow_html=True)
+        if st.button("🧹 Limpiar Formulario"):
+            borrar_borrador_db(caja_sel)
+            for k_cls in [f"n_{d}" for d in [500, 200, 100, 50, 20, 10, 5, 2, 1]] + \
+                         [f"s_{d}" for d in [500, 200, 100, 50, 20, 10, 5, 2, 1]] + \
+                         ["t_cre", "t_deb", "trans", "esp_ak", "notas", "cambio"]:
+                if k_cls in st.session_state:
+                    del st.session_state[k_cls]
+            if f"cargado_{caja_sel}" in st.session_state:
+                del st.session_state[f"cargado_{caja_sel}"]
+            st.rerun()
 
-    # --- REVISIÓN Y RESTAURACIÓN DE BORRADORES (ARRIBA DEL TODO) ---
-    borrador_existente = obtener_borrador_db(caja_sel)
-    if borrador_existente:
-        datos_json, fecha_borrador = borrador_existente
-        st.warning(f"⚠️ Se encontró un borrador guardado para {caja_sel} del **{fecha_borrador}**.")
-        col_b1, col_b2 = st.columns(2)
-        with col_b1:
-            if st.button("🔄 RESTAURAR AVANCE GUARDADO"):
-                datos_cargados = json.loads(datos_json)
-                for key_b, val_b in datos_cargados.items():
-                    st.session_state[key_b] = val_b
-                st.success("✅ ¡Avance restaurado con éxito!")
-                st.rerun()
-        with col_b2:
-            if st.button("🗑️ DESCARTAR BORRADOR"):
-                borrar_borrador_db(caja_sel)
-                st.info("Borrador eliminado.")
-                st.rerun()
+    # --- RESTAURACIÓN AUTOMÁTICA AL ABRIR LA PÁGINA ---
+    if f"cargado_{caja_sel}" not in st.session_state:
+        borrador = obtener_borrador_db(caja_sel)
+        if borrador:
+            datos_cargados = json.loads(borrador[0])
+            for k_b, v_b in datos_cargados.items():
+                st.session_state[k_b] = v_b
+            st.toast("⚡ Avance restaurado automáticamente.", icon="🔄")
+        st.session_state[f"cargado_{caja_sel}"] = True
 
     # 1. BILLETES
     st.markdown("<div class='card-exec'>", unsafe_allow_html=True)
@@ -291,6 +274,20 @@ elif opcion == "📝 Registro de Cierre":
         st.balloons()
     st.markdown("</div>", unsafe_allow_html=True)
 
+    # --- AUTOGUARDADO AUTOMÁTICO EN CADA CAMBIO ---
+    mapa_actual = {}
+    hay_cambios = False
+    for k in [f"n_{d}" for d in [500, 200, 100, 50, 20, 10, 5, 2, 1]] + \
+             [f"s_{d}" for d in [500, 200, 100, 50, 20, 10, 5, 2, 1]] + \
+             ["t_cre", "t_deb", "trans", "esp_ak", "notas", "cambio"]:
+        v_act = st.session_state.get(k, 0)
+        mapa_actual[k] = v_act
+        if v_act:
+            hay_cambios = True
+
+    if hay_cambios:
+        auto_guardar_borrador_db(caja_sel, mapa_actual)
+
     st.markdown("<br>", unsafe_allow_html=True)
 
     # BOTÓN FINAL GUARDAR
@@ -307,7 +304,7 @@ elif opcion == "📝 Registro de Cierre":
             conn.commit()
             conn.close()
             
-            # Limpiamos el borrador temporal ya que el cierre se completó
+            # Limpiamos el borrador ya que el cierre ya se guardó de forma definitiva
             borrar_borrador_db(caja_sel)
             st.success("✅ Cierre guardado en la nube perfectamente.")
 

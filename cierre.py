@@ -3,6 +3,7 @@ import psycopg2
 import pandas as pd
 from datetime import datetime, timedelta, timezone  
 import plotly.express as px
+import json  # Importante para empaquetar el borrador en la nube
 
 # 1. CONFIGURACIÓN DEL FONDO IDEAL HONDURAS (L. 5,000.00)
 FONDO_IDEAL = {500:0, 200:4, 100:20, 50:21, 20:25, 10:25, 5:50, 2:50, 1:50}
@@ -24,14 +25,47 @@ def conectar_db():
         sslmode="require"
     )
     cursor = conn.cursor()
+    # Tabla principal de cierres
     cursor.execute('''CREATE TABLE IF NOT EXISTS cierres 
                      (id SERIAL PRIMARY KEY, fecha TEXT, caja TEXT, efectivo DOUBLE PRECISION, 
                       t_credito DOUBLE PRECISION, t_debito DOUBLE PRECISION, transferencias DOUBLE PRECISION, 
                       total DOUBLE PRECISION, diferencia DOUBLE PRECISION, notas TEXT)''')
+    
+    # Tabla secundaria para guardar borradores temporales anti-pérdida
+    cursor.execute('''CREATE TABLE IF NOT EXISTS borradores 
+                     (caja TEXT PRIMARY KEY, datos TEXT, fecha TEXT)''')
     conn.commit()
     return conn
 
-# --- FUNCIÓN DE CONTROL DE SEGURIDAD (ANTI-DUPLICADOS) ---
+# --- FUNCIONES DE GESTIÓN DE BORRADORES ---
+def guardar_borrador_db(caja, datos_dict):
+    fecha_h = datetime.now(TZ_HONDURAS).strftime("%d/%m/%Y %H:%M")
+    conn = conectar_db()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO borradores (caja, datos, fecha)
+        VALUES (%s, %s, %s)
+        ON CONFLICT (caja) DO UPDATE SET datos = EXCLUDED.datos, fecha = EXCLUDED.fecha
+    """, (caja, json.dumps(datos_dict), fecha_h))
+    conn.commit()
+    conn.close()
+
+def obtener_borrador_db(caja):
+    conn = conectar_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT datos, fecha FROM borradores WHERE caja = %s", (caja,))
+    res = cursor.fetchone()
+    conn.close()
+    return res
+
+def borrar_borrador_db(caja):
+    conn = conectar_db()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM borradores WHERE caja = %s", (caja,))
+    conn.commit()
+    conn.close()
+
+# --- CONTROL DE SEGURIDAD (ANTI-DUPLICADOS) ---
 def verificar_cierre_existente(caja):
     fecha_hoy = datetime.now(TZ_HONDURAS).strftime("%d/%m/%Y")
     conn = conectar_db()
@@ -109,6 +143,25 @@ elif opcion == "📝 Registro de Cierre":
     st.markdown("<h1 style='color:#1E3A8A; font-size:45px;'>Cierre Diario Akasia</h1>", unsafe_allow_html=True)
     caja_sel = st.selectbox("📍 PUNTO DE VENTA", ["CAJA DEL NEGOCIO", "CAJA DE LA CARPA"])
 
+    # --- REVISIÓN Y RESTAURACIÓN DE BORRADORES ---
+    borrador_existente = obtener_borrador_db(caja_sel)
+    if borrador_existente:
+        datos_json, fecha_borrador = borrador_existente
+        st.warning(f"⚠️ Se encontró un borrador guardado para {caja_sel} del **{fecha_borrador}**.")
+        col_b1, col_b2 = st.columns(2)
+        with col_b1:
+            if st.button("🔄 RESTAURAR AVANCE GUARDADO"):
+                datos_cargados = json.loads(datos_json)
+                for key_b, val_b in datos_cargados.items():
+                    st.session_state[key_b] = val_b
+                st.success("✅ ¡Avance restaurado con éxito!")
+                st.rerun()
+        with col_b2:
+            if st.button("🗑️ DESCARTAR BORRADOR"):
+                borrar_borrador_db(caja_sel)
+                st.info("Borrador eliminado.")
+                st.rerun()
+
     # 1. BILLETES
     st.markdown("<div class='card-exec'>", unsafe_allow_html=True)
     st.markdown("### 💵 1. CONTEO DE BILLETES")
@@ -130,15 +183,15 @@ elif opcion == "📝 Registro de Cierre":
     with col_a:
         st.markdown("<div class='card-exec'>", unsafe_allow_html=True)
         st.markdown("### 💳 2. OTROS PAGOS")
-        t_cre = st.number_input("T. CRÉDITO", min_value=0.0)
-        t_deb = st.number_input("T. DÉBITO", min_value=0.0)
-        trans = st.number_input("TRANSFERENCIA", min_value=0.0)
+        t_cre = st.number_input("T. CRÉDITO", min_value=0.0, key="t_cre")
+        t_deb = st.number_input("T. DÉBITO", min_value=0.0, key="t_deb")
+        trans = st.number_input("TRANSFERENCIA", min_value=0.0, key="trans")
         st.markdown("</div>", unsafe_allow_html=True)
     with col_b:
         st.markdown("<div class='card-exec'>", unsafe_allow_html=True)
         st.markdown("### 📄 3. SISTEMA")
-        esp_ak = st.number_input("TOTAL SISTEMA AKASIA", min_value=0.0)
-        notas = st.text_area("🗒️ Notas:")
+        esp_ak = st.number_input("TOTAL SISTEMA AKASIA", min_value=0.0, key="esp_ak")
+        notas = st.text_area("🗒️ Notas:", key="notas")
         st.markdown("</div>", unsafe_allow_html=True)
 
     # 4. BALANCE FINAL
@@ -171,15 +224,14 @@ elif opcion == "📝 Registro de Cierre":
                 st.write(f"❌ L. {d}: faltan {necesito}")
                 txt_wa += f" · L. {d}: Faltan {necesito}\n"
     with f2:
-        cambio = st.number_input("Cambio Tomado", min_value=0.0)
+        cambio = st.number_input("Cambio Tomado", min_value=0.0, key="cambio")
         rep_wa = f"📌 REPOSICIÓN FONDO - {caja_sel}\n❌ Faltante Total: {far(falt_f)}\n💵 Cambio Tomado: {far(cambio)}\n🔄 Vuelto: {far(cambio-falt_f)}\n------------------\nBilletes faltantes:\n{txt_wa if txt_wa else 'Fondo OK ✅'}"
         st.code(rep_wa, language="markdown")
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # 6. SOBRE PARA DEPÓSITO (ACTUALIZADO CON BALANCE DETALLADO)
+    # 6. SOBRE PARA DEPÓSITO
     st.markdown("<div class='card-exec' style='border-top-color:#10B981;'>", unsafe_allow_html=True)
     st.markdown("### 🏦 6. SOBRE PARA DEPÓSITO")
-    
     debe_haber_sobre = total_ef - 5000  
     
     st.markdown(f"""
@@ -199,8 +251,6 @@ elif opcion == "📝 Registro de Cierre":
         for d in [5, 2, 1]: dep_ing[d] = st.number_input(f"Sobre L. {d}", min_value=0, key=f"s_{d}")
     
     total_s = sum(d * cant for d, cant in dep_ing.items())
-    
-    # --- NUEVA LÓGICA: CÁLCULO DE RESTA DEL SOBRE ---
     dif_sobre = total_s - debe_haber_sobre
     
     st.markdown("<br>", unsafe_allow_html=True)
@@ -220,7 +270,22 @@ elif opcion == "📝 Registro de Cierre":
         st.balloons()
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # BOTÓN GUARDAR
+    # BOTÓN SECUNDARIO: GUARDAR BORRADOR EN CUALQUIER MOMENTO
+    st.divider()
+    if st.button("💾 GUARDAR BORRADOR TEMPORAL (RESPALDO DE SEGURIDAD)"):
+        # Empaquetamos todo el estado actual
+        mapa_campos = {}
+        for d in [500, 200, 100, 50, 20, 10, 5, 2, 1]:
+            mapa_campos[f"n_{d}"] = ing[d]
+            mapa_campos[f"s_{d}"] = dep_ing[d]
+        mapa_campos.update({"t_cre": t_cre, "t_deb": t_deb, "trans": trans, "esp_ak": esp_ak, "notas": notas, "cambio": cambio})
+        
+        guardar_borrador_db(caja_sel, mapa_campos)
+        st.success("✅ Progreso guardado de forma segura en la nube. Si la página se recarga, podrás restaurarlo.")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # BOTÓN FINAL GUARDAR
     if st.button("💾 FINALIZAR Y GUARDAR CIERRE"):
         ya_existe = verificar_cierre_existente(caja_sel)
         if ya_existe:
@@ -233,6 +298,9 @@ elif opcion == "📝 Registro de Cierre":
                                  (fecha_h, caja_sel, total_ef, t_cre, t_deb, trans, total_real_v, dif_final, notas))
             conn.commit()
             conn.close()
+            
+            # Limpiamos el borrador temporal ya que el cierre se completó
+            borrar_borrador_db(caja_sel)
             st.success("✅ Cierre guardado en la nube perfectamente.")
 
 elif opcion == "📅 Historial":
